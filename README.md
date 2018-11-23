@@ -7,52 +7,26 @@ Funki Crab is an optimising Brainfuck compiler written in Rust.
 ### Brainfuck Input
 
 ```bf
-++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>.
+++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++
+..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>.
 ```
-### C Output
+### Funki Crab Output (C)
 
 ```c
 #include <stdio.h>
 
-char mem[30000];
+char outputs[13] = { 72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100, 33, 10 };
 
 int main() {
-    char* ptr = mem;
-
-    *ptr += 10;
-    *(ptr + 1) += *ptr * 7;
-    *(ptr + 3) += *ptr * 3;
-    *(ptr + 4) += *ptr * 1;
-    *(ptr + 2) += *ptr * 10;
-    *ptr = 0;
-    *(ptr + 1) += 2;
-    putchar(*(ptr + 1));
-    ++*(ptr + 2) ;
-    putchar(*(ptr + 2));
-    *(ptr + 2) += 7;
-    putchar(*(ptr + 2));
-    putchar(*(ptr + 2));
-    *(ptr + 2) += 3;
-    putchar(*(ptr + 2));
-    *(ptr + 3) += 2;
-    putchar(*(ptr + 3));
-    *(ptr + 1) += 15;
-    putchar(*(ptr + 1));
-    putchar(*(ptr + 2));
-    *(ptr + 2) += 3;
-    putchar(*(ptr + 2));
-    *(ptr + 2) -= 6;
-    putchar(*(ptr + 2));
-    *(ptr + 2) -= 8;
-    putchar(*(ptr + 2));
-    ++*(ptr + 3) ;
-    putchar(*(ptr + 3));
-    putchar(*(ptr + 4));
-    ptr += 4;
-
-
-    return 0;
+    fwrite(outputs, sizeof(char), 13, stdout);
+	return 0;
 }
+```
+
+### Execution Result
+
+```
+Hello World!
 ```
 
 ## Purpose
@@ -158,6 +132,12 @@ Becomes:
 ++ptr;
 *ptr = getchar();
 ```
+
+### Compile-Time Execution
+
+Funki Crab is capable of partial execution of the program at compile-time for all instructions other than `.`. For programs that do not rely on input, and finish
+execution with fewer than 1 million instructions, it's even possible for Funki Crab to fully execute the entire program and emit only the code necessary to print
+the end result.
 
 ## Combining Optimisations
 

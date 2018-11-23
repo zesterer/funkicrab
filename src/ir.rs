@@ -53,7 +53,7 @@ pub fn optimise_to_copymuls(base_shift: i32, ir: &Vec<Inst>) -> Option<Vec<(i32,
     }
 
     if let Some(&(i, n)) = copymuls.get(&base_shift) {
-        if n == -1 && i == 0 || i == ir.len() - 1 {
+        if n == -2 && i == 0 || i == ir.len() - 1 {
             copymuls.remove(&0);
             return Some(copymuls.into_iter().map(|(shift, (i, f))| (shift, f)).collect());
         }

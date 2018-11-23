@@ -1,7 +1,7 @@
 use crate::ir::Inst;
 use super::Error;
 
-pub fn compile(insts: Vec<Inst>) -> Result<String, Error> {
+pub fn compile(insts: Vec<Inst>, ptr: i32, cells: Vec<u8>, outputs: Vec<u8>) -> Result<String, Error> {
     fn write_body(insts: Vec<Inst>, depth: usize) -> String {
         let mut code = String::new();
         for inst in insts {
@@ -84,17 +84,24 @@ pub fn compile(insts: Vec<Inst>) -> Result<String, Error> {
         code
     }
 
+    let cell_str = cells.into_iter().map(|c| format!("{}", c)).collect::<Vec<_>>().join(", ");
+    let outputs_str = outputs.iter().map(|&c| format!("{}", c)).collect::<Vec<_>>().join(", ");
+
     Ok(format!(r#"
 #include <stdio.h>
 
-char mem[30000];
+char mem[30000] = {{ {} }};
+
+#define OUTPUTS {}
+char outputs[OUTPUTS] = {{ {} }};
 
 int main() {{
-    char* ptr = mem;
+    char* ptr = mem + {};
+    fwrite(outputs, sizeof(char), OUTPUTS, stdout);
 
 {}
 
     return 0;
 }}
-"#, write_body(insts, 1)))
+"#, cell_str, outputs.len(), outputs_str, ptr, write_body(insts, 1)))
 }

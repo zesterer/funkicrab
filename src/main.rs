@@ -2,6 +2,7 @@
 
 mod ir;
 mod comp;
+mod exec;
 
 use std::{
     env,
@@ -74,7 +75,8 @@ fn main() -> Result<(), Error> {
     let ir = ir::from_tokens(tokens);
     let ir = ir::optimise(ir);
     //println!("Optimised ({} instructions):\n{:?}", ir.len(), ir);
-    let out_txt = comp::compile(ir)?;
+    let (ir, ptr, cells, outputs) = exec::preexecute(ir);
+    let out_txt = comp::compile(ir, ptr, cells, outputs)?;
 
     write!(File::create(out_file)?, "{}", out_txt)?;
 
