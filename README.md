@@ -2,9 +2,62 @@
 
 Funki Crab is an optimising Brainfuck compiler written in Rust.
 
+## Example
+
+### Brainfuck Input
+
+```bf
+++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>.
+```
+### C Output
+
+```c
+#include <stdio.h>
+
+char mem[30000];
+
+int main() {
+    char* ptr = mem;
+
+    *ptr += 10;
+    *(ptr + 1) += *ptr * 7;
+    *(ptr + 3) += *ptr * 3;
+    *(ptr + 4) += *ptr * 1;
+    *(ptr + 2) += *ptr * 10;
+    *ptr = 0;
+    *(ptr + 1) += 2;
+    putchar(*(ptr + 1));
+    ++*(ptr + 2) ;
+    putchar(*(ptr + 2));
+    *(ptr + 2) += 7;
+    putchar(*(ptr + 2));
+    putchar(*(ptr + 2));
+    *(ptr + 2) += 3;
+    putchar(*(ptr + 2));
+    *(ptr + 3) += 2;
+    putchar(*(ptr + 3));
+    *(ptr + 1) += 15;
+    putchar(*(ptr + 1));
+    putchar(*(ptr + 2));
+    *(ptr + 2) += 3;
+    putchar(*(ptr + 2));
+    *(ptr + 2) -= 6;
+    putchar(*(ptr + 2));
+    *(ptr + 2) -= 8;
+    putchar(*(ptr + 2));
+    ++*(ptr + 3) ;
+    putchar(*(ptr + 3));
+    putchar(*(ptr + 4));
+    ptr += 4;
+
+
+    return 0;
+}
+```
+
 ## Purpose
 
-I created Funki Crab as an exercise in learning about compiler development, Immediate Representation (IR) techniques and optimisation. Brainfuck struck me as a 
+I created Funki Crab as an exercise in learning about compiler development, Immediate Representation (IR) techniques and optimisation. Brainfuck struck me as a
 sensible language for such a project given its simplicity, Turing-completeness and wealth of potential optimisations.
 
 Funki Crab is an anagram of Brainfuck. 'Crab' is a reference to Ferris, the Rust mascot.
@@ -116,5 +169,5 @@ Typical speedup with Funki Crab optimisations enabled vs disabled for substantia
 
 ## Future
 
-I don't plan to maintain Funki Crab as a long-term project. Perhaps I'll add things like better loop unrolling, constant propagation, compile-time execution or 
+I don't plan to maintain Funki Crab as a long-term project. Perhaps I'll add things like better loop unrolling, constant propagation, compile-time execution or
 instruction reordering to improve cache coherency in the future.

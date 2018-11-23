@@ -85,6 +85,8 @@ pub fn optimise_binary_combination(ir: Vec<Inst>) -> Vec<Inst> {
             // Dead code elimination
             (Inst::SetC(r0, _), Inst::SetC(r1, n)) if r0 == r1 => { current = Inst::SetC(r0, n); },
             (Inst::Add(r0, _), Inst::SetC(r1, n)) if r0 == r1 => { current = Inst::SetC(r0, n); },
+            (Inst::Add(r0, _), Inst::Input(r1)) if r0 == r1 => { current = Inst::Input(r0); },
+            (Inst::SetC(r0, _), Inst::Input(r1)) if r0 == r1 => { current = Inst::Input(r0); },
 
             // Combining
             (Inst::Move(a), Inst::Move(b)) => { current = Inst::Move(a + b); },
