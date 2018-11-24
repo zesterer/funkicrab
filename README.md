@@ -176,6 +176,14 @@ the end result.
 
 Funki Crab is capable of combining the optimisations listed above, and more, through multiple transformations of the IR.
 
+Example:
+
+`+.>>+<---+>[-<+[-][>>++++[.-]][-++]->+-]--`
+
+Becomes:
+
+*Nothing*
+
 ## Speedup
 
 Typical speedup with Funki Crab optimisations enabled vs disabled for substantial Brainfuck programs is ~100x.
