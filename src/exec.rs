@@ -12,6 +12,7 @@ pub fn preexecute(insts: Vec<Inst>) -> (Vec<Inst>, i32, Vec<u8>, Vec<u8>) {
         true
     }
 
+    #[derive(Debug)]
     enum Done {
         Full,
         Partial(usize),
@@ -38,7 +39,7 @@ pub fn preexecute(insts: Vec<Inst>) -> (Vec<Inst>, i32, Vec<u8>, Vec<u8>) {
                 Inst::CopyMul(b, r, f) => {
                     let idx_r = (*ptr + r) as usize;
                     let idx_b = (*ptr + b) as usize;
-                    if !create_if_none(cells, idx_r) || create_if_none(cells, idx_b) {
+                    if !create_if_none(cells, idx_r) || !create_if_none(cells, idx_b) {
                         return Done::Partial(i);
                     }
                     cells[idx_r] = cells[idx_r].wrapping_add((cells[idx_b] as i32 * f) as u8);
@@ -86,7 +87,7 @@ pub fn preexecute(insts: Vec<Inst>) -> (Vec<Inst>, i32, Vec<u8>, Vec<u8>) {
     let mut outputs = vec![];
 
     let done = exec(&mut iter_left, &insts, &mut ptr, &mut cells, &mut outputs);
-    let done = Done::None;
+    //let done = Done::None;
 
     match done {
         Done::Full => (vec![], ptr, vec![], outputs),
