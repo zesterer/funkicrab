@@ -86,6 +86,7 @@ pub fn preexecute(insts: Vec<Inst>) -> (Vec<Inst>, i32, Vec<u8>, Vec<u8>) {
     let mut outputs = vec![];
 
     let done = exec(&mut iter_left, &insts, &mut ptr, &mut cells, &mut outputs);
+    //let done = Done::None;
 
     match done {
         Done::Full => (vec![], ptr, vec![], outputs),

@@ -53,7 +53,7 @@ pub fn optimise_to_copymuls(base_shift: i32, ir: &Vec<Inst>) -> Option<Vec<(i32,
     }
 
     if let Some(&(i, n)) = copymuls.get(&base_shift) {
-        if n == -2 && i == 0 || i == ir.len() - 1 {
+        if n == -1 && i == 0 || i == ir.len() - 1 {
             copymuls.remove(&0);
             return Some(copymuls.into_iter().map(|(shift, (i, f))| (shift, f)).collect());
         }
@@ -149,8 +149,6 @@ pub fn optimise_move(ir: Vec<Inst>, base_shift: i32) -> Vec<Inst> {
             Inst::Input(r) => { insts.push(Inst::Input(base_shift + r + shift)); },
             Inst::Output(r) => { insts.push(Inst::Output(base_shift + r + shift)); },
             Inst::Loop(b, ir) => {
-                //insts.push(Inst::Move(shift));
-                //shift = 0;
                 insts.push(Inst::Loop(base_shift + shift + b, optimise_move(ir, base_shift + shift)));
             },
             i => { insts.push(i); },
