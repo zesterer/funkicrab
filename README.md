@@ -2,6 +2,8 @@
 
 Funki Crab is an optimising Brainfuck compiler written in Rust.
 
+**Note: The quality of the code in Funki Crab is, currently, abysmal. If you're looking to use it as a source of information... don't. I'm working on improving this situation.**
+
 ## Example
 
 ### Brainfuck Input
