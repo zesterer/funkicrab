@@ -70,8 +70,8 @@ Example:
 Becomes:
 
 ```
-*(ptr + 1) += *ptr * 3;
-*(ptr + 4) -= *ptr * 2;
+ptr[1] += *ptr * 3;
+ptr[4] -= *ptr * 2;
 *ptr = 0;
 ```
 
@@ -99,7 +99,7 @@ Becomes:
 
 ```
 ++*ptr;
-++*(ptr + 3);
+++ptr[3];
 ```
 
 ### Inter-Loop Shift Elision
@@ -112,7 +112,7 @@ Example:
 
 ```
 ++*ptr;
-while (*(ptr - 2)) {
+while (ptr[-2]) {
 	++ptr;
 }
 ```

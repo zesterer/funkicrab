@@ -20,59 +20,51 @@ pub fn compile(insts: Vec<Inst>, ptr: i32, cells: Vec<u8>, outputs: Vec<u8>) -> 
                     } else if n == -1 {
                         code.push_str("--");
                     }
-                    if r > 0 {
-                        code.push_str(&format!("*(ptr + {}) ", r));
-                    } else if r < 0 {
-                        code.push_str(&format!("*(ptr - {}) ", -r));
+                    if r == 0 {
+                        code.push_str("*ptr");
                     } else {
-                        code.push_str("*ptr ");
+                        code.push_str(&format!("ptr[{}]", r));
                     }
                     if n > 1 {
-                        code.push_str(&format!("+= {}", n));
+                        code.push_str(&format!(" += {}", n));
                     } else if n < -1 {
-                        code.push_str(&format!("-= {}", -n));
+                        code.push_str(&format!(" -= {}", -n));
                     }
                     code.push_str(";\n");
                 },
 
                 Inst::CopyMul(r, i, f) => {
-                    if i > 0 {
-                        code.push_str(&format!("*(ptr + {}) ", i));
-                    } else if i < 0 {
-                        code.push_str(&format!("*(ptr - {}) ", -i));
+                    if i == 0 {
+                        code.push_str("*ptr");
                     } else {
-                        code.push_str("*ptr ");
+                        code.push_str(&format!("ptr[{}]", i));
                     }
                     if f > 0 {
-                        code.push_str("+= ");
+                        code.push_str(" +=");
                     } else if f < 0 {
-                        code.push_str("-= ");
+                        code.push_str(" -=");
                     }
-                    if r > 0 {
-                        code.push_str(&format!("*(ptr + {}) ", r));
-                    } else if r < 0 {
-                        code.push_str(&format!("*(ptr - {}) ", -r));
+                    if r == 0 {
+                        code.push_str(" *ptr");
                     } else {
-                        code.push_str("*ptr ");
+                        code.push_str(&format!(" ptr[{}]", r));
                     }
-                    code.push_str(&format!("* {};\n", f.abs()));
+                    code.push_str(&format!(" * {};\n", f.abs()));
                 },
 
                 Inst::SetC(r, n) => {
-                    if r > 0 {
-                        code.push_str(&format!("*(ptr + {}) ", r));
-                    } else if r < 0 {
-                        code.push_str(&format!("*(ptr - {}) ", -r));
+                    if r == 0 {
+                        code.push_str("*ptr");
                     } else {
-                        code.push_str("*ptr ");
+                        code.push_str(&format!("ptr[{}]", r));
                     }
-                    code.push_str(&format!("= {};\n", n));
+                    code.push_str(&format!(" = {};\n", n));
                 },
 
-                Inst::Output(r) => code.push_str(&format!("putchar(*(ptr + {}));\n", r)),
-                Inst::Input(r) => code.push_str(&format!("*(ptr + {}) = getchar();\n", r)),
+                Inst::Output(r) => code.push_str(&format!("putchar(ptr[{}]);\n", r)),
+                Inst::Input(r) => code.push_str(&format!("ptr[{}] = getchar();\n", r)),
                 Inst::Loop(base, insts) => {
-                    code.push_str(&format!("while (*(ptr + {})) {{\n", base));
+                    code.push_str(&format!("while (ptr[{}]) {{\n", base));
                     code.push_str(&write_body(insts, depth + 1));
                     for _ in 0..depth { code.push_str("    "); }
                     code.push_str("}\n");
