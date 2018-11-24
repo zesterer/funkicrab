@@ -112,7 +112,7 @@ Funki Crab can elide shifts across loop boundaries.
 
 Example:
 
-`+<<[>]`
+`+<<[>]>>`
 
 ```c
 ++*ptr;
