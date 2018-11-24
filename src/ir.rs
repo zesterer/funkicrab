@@ -40,12 +40,18 @@ pub fn from_tokens(tokens: Vec<Token>) -> Vec<Inst> {
 
 pub fn optimise_to_copymuls(base_shift: i32, ir: &Vec<Inst>) -> Option<Vec<(i32, i32)>> {
     let mut copymuls = HashMap::new();
+    let mut net = 0;
     for (i, inst) in ir.iter().enumerate() {
         match inst {
-            &Inst::Add(r, f) => if !copymuls.contains_key(&r) {
-                copymuls.insert(r, (i, f));
-            } else {
-                return None;
+            &Inst::Add(r, f) => {
+                if !copymuls.contains_key(&r) {
+                    copymuls.insert(r, (i, f));
+                } else {
+                    copymuls.get_mut(&r).map(|(_, cf)| *cf += f);
+                }
+                if r == base_shift {
+                    net += f;
+                }
             },
             // Failure
             inst => { return None; },
@@ -53,7 +59,7 @@ pub fn optimise_to_copymuls(base_shift: i32, ir: &Vec<Inst>) -> Option<Vec<(i32,
     }
 
     if let Some(&(i, n)) = copymuls.get(&base_shift) {
-        if n == -1 && i == 0 || i == ir.len() - 1 {
+        if net == -1 {
             copymuls.remove(&0);
             return Some(copymuls.into_iter().map(|(shift, (i, f))| (shift, f)).collect());
         }
@@ -160,6 +166,111 @@ pub fn optimise_move(ir: Vec<Inst>, base_shift: i32) -> Vec<Inst> {
     insts
 }
 
+// This must *only* be called upon the entire program
+pub fn optimise_analyse_cells(ir: Vec<Inst>) -> Vec<Inst> {
+    type CellInfo = Option<u8>;
+
+    fn analyse_loop(ir: &Vec<Inst>, ptr: &mut i32, mut cells: Vec<CellInfo>) -> Vec<Inst> {
+        fn get_cell_val(cells: &Vec<CellInfo>, idx: usize) -> CellInfo {
+            *cells.get(idx).unwrap_or(&Some(0))
+        }
+
+        fn set_cell_val(cells: &mut Vec<CellInfo>, idx: usize, val: u8) {
+            if val != 0 {
+                while cells.len() <= idx { cells.push(Some(0)); }
+            }
+            cells.get_mut(idx).map(|c| *c = Some(val));
+        }
+
+        fn add_cell_val(cells: &mut Vec<CellInfo>, idx: usize, incr: i32) {
+            if incr != 0 {
+                while cells.len() <= idx { cells.push(Some(0)); }
+                let cell = cells.get_mut(idx).unwrap();
+                *cell = cell.map(|v| (v as i32 + incr) as u8);
+            }
+        }
+
+        fn invalidate_cell_val(cells: &mut Vec<CellInfo>, idx: usize) {
+            while cells.len() <= idx { cells.push(Some(0)); }
+            let cell = cells.get_mut(idx).unwrap();
+            *cell = None;
+        }
+
+        // At the start of a loop, we have to eliminate knowledge of all cells
+        // TODO: Keep cells that we can prove are not altered
+        for cell in cells.iter_mut() {
+            *cell = None;
+        }
+
+        let mut insts = vec![];
+        let mut broken = false;
+        for inst in ir {
+            if broken {
+                insts.push(inst.clone());
+                continue;
+            }
+            match inst.clone() {
+                Inst::Add(r, n) => {
+                    let idx = (*ptr + r) as usize;
+                    add_cell_val(&mut cells, idx, n);
+                    insts.push(inst.clone());
+                },
+                Inst::CopyMul(b, r, f) => {
+                    // TODO: Properly test this
+                    let idx_b = (*ptr + b) as usize;
+                    let idx_r = (*ptr + r) as usize;
+                    let val_b = get_cell_val(&cells, idx_b);
+                    let val_r = get_cell_val(&cells, idx_r);
+                    if let Some(val_b) = val_b {
+                        add_cell_val(&mut cells, idx_r, val_b as i32 * f);
+                    } else {
+                        invalidate_cell_val(&mut cells, idx_r);
+                    }
+
+                    if let Some(0) = val_b {
+                        // Do nothing
+                    } else if f != 0 {
+                        insts.push(inst.clone());
+                    }
+                },
+                Inst::SetC(r, n) => {
+                    let idx = (*ptr + r) as usize;
+                    let val = get_cell_val(&cells, idx);
+                    if val != Some(n as u8) {
+                        set_cell_val(&mut cells, idx, n as u8);
+                        insts.push(inst.clone());
+                    }
+                },
+                Inst::Move(n) => {
+                    *ptr += n;
+                    insts.push(inst.clone());
+                },
+                Inst::Loop(b, ir) => {
+                    let idx = (*ptr + b) as usize;
+                    let val = get_cell_val(&cells, idx);
+                    if val != Some(0) {
+                        insts.push(Inst::Loop(b, analyse_loop(&ir, ptr, cells.clone())));
+                        broken = true;
+                    }
+                },
+                Inst::Input(r) => {
+                    let idx = (*ptr + r) as usize;
+                    invalidate_cell_val(&mut cells, idx);
+                    insts.push(inst.clone());
+                },
+                inst => { insts.push(inst.clone()); },
+            }
+        }
+
+        insts
+    }
+
+    let mut cells = Vec::new();
+    let mut ptr = 0;
+
+    analyse_loop(&ir, &mut ptr, cells)
+}
+
 pub fn optimise_stream(ir: Vec<Inst>) -> Vec<Inst> {
     let ir = optimise_binary_combination(ir);
     let ir = optimise_subloops(ir);
@@ -168,10 +279,25 @@ pub fn optimise_stream(ir: Vec<Inst>) -> Vec<Inst> {
     ir
 }
 
+pub fn optimise_remove_prog_tail(mut ir: Vec<Inst>) -> Vec<Inst> {
+    while let Some(inst) = ir.last().cloned() {
+        match inst {
+            Inst::Input(_) => break,
+            Inst::Output(_) => break,
+            Inst::Loop(_, _) => break,
+            i => { ir.pop(); },
+        }
+    }
+
+    ir
+}
+
 pub fn optimise(ir: Vec<Inst>) -> Vec<Inst> {
     let mut ir = ir;
     loop {
         let new_ir = optimise_stream(ir.clone());
+        let new_ir = optimise_analyse_cells(new_ir);
+        let new_ir = optimise_remove_prog_tail(new_ir);
         if new_ir == ir {
             return ir;
         } else {

@@ -52,7 +52,7 @@ Example:
 
 Becomes:
 
-```
+```c
 *ptr += 4;
 ptr += 2;
 *ptr -= 2;
@@ -69,7 +69,7 @@ Example:
 
 Becomes:
 
-```
+```c
 ptr[1] += *ptr * 3;
 ptr[4] -= *ptr * 2;
 *ptr = 0;
@@ -85,7 +85,9 @@ Example:
 
 Becomes:
 
-`*ptr = 4;`
+```c
+*ptr = 4;
+```
 
 ### Shift Elision
 
@@ -97,7 +99,7 @@ Example:
 
 Becomes:
 
-```
+```c
 ++*ptr;
 ++ptr[3];
 ```
@@ -110,7 +112,7 @@ Example:
 
 `+<<[>]`
 
-```
+```c
 ++*ptr;
 while (ptr[-2]) {
 	++ptr;
@@ -127,10 +129,39 @@ Example:
 
 Becomes:
 
-```
+```c
 *ptr = getchar();
 ++ptr;
 *ptr = getchar();
+```
+
+### Static Cell Analysis
+
+Funki Crab can analyse the value of cells and operations performed upon cells at compile-time and reason about their effect on later parts of the program.
+This means that even more dead code can be eliminated and certain instructions can safely be elided. In addition, Funki Crab can use this analysis information to
+test the accessibility of a loop, eliding it if possible.
+
+Example:
+
+`>[.-]`
+
+Becomes:
+
+*Nothing*
+
+### Dead Tail Elimination
+
+Funki Crab can analyse instructions at the tail of a program and eliminate them if it can prove that they have no impact.
+
+Example:
+
+`+.>>+<---+>`
+
+Becomes:
+
+```c
+++*ptr;
+putchar(ptr[0]);
 ```
 
 ### Compile-Time Execution
