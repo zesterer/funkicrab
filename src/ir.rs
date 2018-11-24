@@ -73,6 +73,14 @@ pub fn optimise_loop(base_shift: i32, ir: Vec<Inst>) -> Vec<Inst> {
         return ir;
     }
 
+    if ir.len() == 1 {
+        if let Inst::SetC(r, 0) = ir[0] {
+            if r == base_shift {
+                return vec![Inst::SetC(r, 0)];
+            }
+        }
+    }
+
     vec![Inst::Loop(base_shift, ir)]
 }
 
@@ -98,6 +106,8 @@ pub fn optimise_binary_combination(ir: Vec<Inst>) -> Vec<Inst> {
 
             // Nop elimination
             (Inst::Nop, i) => { current = i; },
+            (c, Inst::Add(_, 0)) => {},
+            (c, Inst::CopyMul(_, _, 0)) => {},
             (c, Inst::Nop) => {},
             (c, Inst::Move(0)) => {},
 
