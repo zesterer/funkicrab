@@ -4,6 +4,7 @@ mod ir;
 mod comp;
 mod exec;
 mod hir;
+mod llir;
 
 use std::{
     env,
@@ -72,6 +73,14 @@ fn main() -> Result<(), Error> {
     File::open(in_file)?.read_to_string(&mut in_txt)?;
 
     let tokens = parse(in_txt)?;
+
+    // Testing
+    /*
+    let prog = llir::Program::from(tokens.clone());
+    println!("Program: {:?}", prog);
+    let out_txt = prog.generate_c()?;
+    */
+
     //println!("Unoptimised ({} tokens):\n{:?}", tokens.len(), tokens);
     let ir = ir::from_tokens(tokens);
     let ir = ir::optimise(ir);

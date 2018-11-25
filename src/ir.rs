@@ -108,7 +108,8 @@ pub fn optimise_binary_combination(ir: Vec<Inst>) -> Vec<Inst> {
             (Inst::SetC(r0, a), Inst::Add(r1, b)) if r0 == r1 => { current = Inst::SetC(r0, a + b); },
 
             // Shifting
-            (Inst::Add(r, a), Inst::Move(n)) => { insts.push(Inst::Move(n)); current = Inst::Add(r - n, a); },
+            (Inst::Move(n), Inst::Add(r, a)) => { insts.push(Inst::Add(r + n, a)); current = Inst::Move(n); },
+            (Inst::Move(n), Inst::Output(r)) => { insts.push(Inst::Output(r + n)); current = Inst::Move(n); },
 
             // Nop elimination
             (Inst::Nop, i) => { current = i; },
@@ -211,14 +212,14 @@ pub fn optimise_analyse_cells(ir: Vec<Inst>) -> Vec<Inst> {
             }
             match inst.clone() {
                 Inst::Add(r, n) => {
-                    let idx = (*ptr + r) as usize;
+                    let idx = (*ptr + r).max(0) as usize;
                     add_cell_val(&mut cells, idx, n);
                     insts.push(inst.clone());
                 },
                 Inst::CopyMul(b, r, f) => {
                     // TODO: Properly test this
-                    let idx_b = (*ptr + b) as usize;
-                    let idx_r = (*ptr + r) as usize;
+                    let idx_b = (*ptr + b).max(0) as usize;
+                    let idx_r = (*ptr + r).max(0) as usize;
                     let val_b = get_cell_val(&cells, idx_b);
                     let val_r = get_cell_val(&cells, idx_r);
                     if let Some(val_b) = val_b {
@@ -234,7 +235,7 @@ pub fn optimise_analyse_cells(ir: Vec<Inst>) -> Vec<Inst> {
                     }
                 },
                 Inst::SetC(r, n) => {
-                    let idx = (*ptr + r) as usize;
+                    let idx = (*ptr + r).max(0) as usize;
                     let val = get_cell_val(&cells, idx);
                     if val != Some(n as u8) {
                         set_cell_val(&mut cells, idx, n as u8);
@@ -246,7 +247,7 @@ pub fn optimise_analyse_cells(ir: Vec<Inst>) -> Vec<Inst> {
                     insts.push(inst.clone());
                 },
                 Inst::Loop(b, ir) => {
-                    let idx = (*ptr + b) as usize;
+                    let idx = (*ptr + b).max(0) as usize;
                     let val = get_cell_val(&cells, idx);
                     if val != Some(0) {
                         insts.push(Inst::Loop(b, analyse_loop(&ir, ptr, cells.clone())));
@@ -254,7 +255,7 @@ pub fn optimise_analyse_cells(ir: Vec<Inst>) -> Vec<Inst> {
                     }
                 },
                 Inst::Input(r) => {
-                    let idx = (*ptr + r) as usize;
+                    let idx = (*ptr + r).max(0) as usize;
                     invalidate_cell_val(&mut cells, idx);
                     insts.push(inst.clone());
                 },
@@ -293,8 +294,9 @@ pub fn optimise_remove_prog_tail(mut ir: Vec<Inst>) -> Vec<Inst> {
 }
 
 pub fn optimise(ir: Vec<Inst>) -> Vec<Inst> {
+    const MAX_ATTEMPTS: usize = 10;
     let mut ir = ir;
-    loop {
+    for _ in 0..MAX_ATTEMPTS {
         let new_ir = optimise_stream(ir.clone());
         let new_ir = optimise_analyse_cells(new_ir);
         let new_ir = optimise_remove_prog_tail(new_ir);
@@ -304,4 +306,5 @@ pub fn optimise(ir: Vec<Inst>) -> Vec<Inst> {
             ir = new_ir;
         }
     }
+    ir
 }
