@@ -5,6 +5,7 @@ mod comp;
 mod exec;
 mod hir;
 mod llir;
+mod opt;
 
 use std::{
     env,
@@ -77,11 +78,12 @@ fn main() -> Result<(), Error> {
     // Testing
     /*
     let prog = llir::Program::from(tokens.clone());
-    println!("Program: {:?}", prog);
+    println!("Program: {:?}\n", prog);
+    let prog = opt::optimise(prog);
+    println!("Optimised program: {:?}", prog);
     let out_txt = prog.generate_c()?;
     */
 
-    //println!("Unoptimised ({} tokens):\n{:?}", tokens.len(), tokens);
     let ir = ir::from_tokens(tokens);
     let ir = ir::optimise(ir);
     //println!("Optimised ({} instructions):\n{:?}", ir.len(), ir);
