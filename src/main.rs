@@ -3,6 +3,7 @@
 mod ir;
 mod comp;
 mod exec;
+mod hir;
 
 use std::{
     env,
@@ -77,6 +78,11 @@ fn main() -> Result<(), Error> {
     //println!("Optimised ({} instructions):\n{:?}", ir.len(), ir);
     let (ir, ptr, cells, outputs) = exec::preexecute(ir);
     let out_txt = comp::compile(ir, ptr, cells, outputs)?;
+
+    // Testing
+    //let prog = hir::Program::from(ir.clone());
+    //println!("Program = {:?}", prog);
+    //let out_txt = prog.generate_c();
 
     write!(File::create(out_file)?, "{}", out_txt)?;
 
