@@ -211,7 +211,9 @@ impl LoopSection {
         } else {
             // A loop has no effect if all of its sub-sections have no effect and it has a net
             // shift of 0
-            self.sections.iter().all(|s| s.has_no_effect()) && if let ValInfo::Exactly(0) = self.shift { true } else { false }
+            //self.sections.iter().all(|s| s.has_no_effect()) && if let ValInfo::Exactly(0) = self.shift { true } else { false }
+            // TODO: The above is an unsound assumption, since an infinite loop may be desired.
+            false
         }
     }
 

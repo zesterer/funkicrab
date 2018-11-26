@@ -76,19 +76,19 @@ fn main() -> Result<(), Error> {
     let tokens = parse(in_txt)?;
 
     // Testing
-    /*
     let prog = llir::Program::from(tokens.clone());
     println!("Program: {:?}\n", prog);
     let prog = opt::optimise(prog);
     println!("Optimised program: {:?}", prog);
     let out_txt = prog.generate_c()?;
-    */
 
+    /*
     let ir = ir::from_tokens(tokens);
     let ir = ir::optimise(ir);
     //println!("Optimised ({} instructions):\n{:?}", ir.len(), ir);
     let (ir, ptr, cells, outputs) = exec::preexecute(ir);
     let out_txt = comp::compile(ir, ptr, cells, outputs)?;
+    */
 
     // Testing
     //let prog = hir::Program::from(ir.clone());
