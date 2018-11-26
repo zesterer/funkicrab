@@ -1,63 +1,108 @@
 use crate::llir::{
+    Idx,
+    Diff,
     ValInfo,
     CellAccessInfo,
-    Program,
+    Expr,
+    Change,
+    BasicSection,
+    IoOp,
+    IoSection,
     Section,
+    Program,
 };
 
-// This optimisation attempts to calculate as much information about the net shift of a section
-// as it possibly can. It does this by recursively searching through the section and its children,
-// propagating what information it discovers downwards. For non-loops, this is a relatively
-// trivial operation since the shifts are known at compile-time and need only by summed and
-// propagated appropriately. However, we can also compute useful information for loops:
-// - If the shift of a single iteration is 0, we are sure that N iterations also have a shift of 0
-// - If the shift of a single iteration is F, we are sure that N iterations have a shift of F * N
-pub fn optimise_calc_shifts(section: &mut Section) {
-    fn calc_and_apply_shift(section: &mut Section) -> ValInfo {
-        match section {
-            Section::Loop(luup) => {
-                let mut total_shift = ValInfo::Exactly(0);
-                for mut section in luup.sections.iter_mut() {
-                    total_shift = match (total_shift, calc_and_apply_shift(&mut section)) {
-                        (ValInfo::Exactly(total), ValInfo::Exactly(val)) => ValInfo::Exactly(total + val),
-                        (ValInfo::MultipleOf { base, factor }, ValInfo::Exactly(val)) => ValInfo::MultipleOf { base: base + val, factor },
-                        (ValInfo::Exactly(total), ValInfo::MultipleOf { base, factor }) => ValInfo::MultipleOf { base: total + base, factor },
-                        // Fallback to an unknown shift
-                        _ => ValInfo::Unknown,
-                    };
-                }
-                luup.shift = match total_shift {
-                    ValInfo::Exactly(0) => ValInfo::Exactly(0),
-                    ValInfo::Exactly(n) => ValInfo::MultipleOf { base: 0, factor: n },
-                    // Everything else has no form that can be expressed by the current ValInfo system
-                    // TODO: add base0 + (base1 + N * factor1) + factor0?
-                    _ => ValInfo::Unknown,
-                };
-                luup.shift
-            },
-            // All other sections always have a deterministic shift
-            section => section.get_shift(),
-        }
-    }
-
-    calc_and_apply_shift(section);
+pub fn optimise_expr(expr: &mut Expr) {
+    expr.simplify_local();
 }
 
-pub fn optimise_sections(mut sections: Vec<Section>) -> Vec<Section> {
-    let mut new_sections = vec![];
-    for mut section in sections {
-        optimise_calc_shifts(&mut section);
-
-        if !section.has_no_effect() {
-            new_sections.push(section);
+pub fn optimise_basic_section(mut basic: BasicSection) -> BasicSection {
+    for (idx, change) in &mut basic.changes {
+        match change {
+            Change::Set(expr) => optimise_expr(expr),
+            Change::Incr(expr) => optimise_expr(expr),
         }
     }
 
+    basic
+        .changes
+        .retain(|idx, change| match change {
+            Change::Set(expr) => true,
+            Change::Incr(expr) => expr.eval_local().map(|val| val.0 != 0).unwrap_or(true),
+        });
+
+    basic
+}
+
+pub fn optimise_io_section(mut io: IoSection) -> IoSection {
+    for op in &mut io.ops {
+        match op {
+            IoOp::InputCell(_) => {},
+            IoOp::Output(expr) => optimise_expr(expr),
+        }
+    }
+    io
+}
+
+pub fn optimise_sections_combine(sections: Vec<Section>) -> Vec<Section> {
+    let mut new_sections: Vec<Section> = vec![];
+
+    let mut current = None;
+    for section in sections {
+        if let Some(mut prev) = current.take() {
+            match (prev, section) {
+                // Combine consecutive basic sections by applying the latter to the former
+                (Section::Basic(prev), Section::Basic(next)) => {
+                    // Basic sections can only be combined if they have non-conflicting cell writes
+                    if let Some(new) = prev.apply(&next) {
+                        current = Some(Section::Basic(new));
+                    } else {
+                        new_sections.push(Section::Basic(prev));
+                        current = Some(Section::Basic(next));
+                    }
+                },
+                // Default
+                (prev, next) => { new_sections.push(prev); current = Some(next); },
+            }
+        } else {
+            current = Some(section);
+        }
+    }
+
+    current.take().map(|c| new_sections.push(c));
     new_sections
 }
 
+pub fn optimise_sections(sections: &Vec<Section>) -> Vec<Section> {
+    let mut new_sections = vec![];
+
+    for mut section in sections {
+        let new_section = match section.clone() {
+            Section::Basic(basic) => Section::Basic(optimise_basic_section(basic)),
+            Section::Io(io) => Section::Io(optimise_io_section(io)),
+            Section::Loop(mut luup) => {
+                luup.sections = optimise_sections(&luup.sections);
+                Section::Loop(luup)
+            },
+            s => s,
+        };
+
+        if !new_section.has_no_effect() {
+            match &new_section {
+                // Attempt to linearise the loop
+                Section::Loop(luup) => {
+                    new_sections.append(&mut luup.linearise().unwrap_or(vec![new_section.clone()]))
+                },
+                _ => new_sections.push(new_section.clone()),
+            };
+        }
+    }
+
+    optimise_sections_combine(new_sections)
+}
+
 pub fn optimise_program(mut prog: Program) -> Program {
-    prog.sections = optimise_sections(prog.sections);
+    prog.sections = optimise_sections(&prog.sections);
     prog
 }
 

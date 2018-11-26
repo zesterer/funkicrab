@@ -77,9 +77,9 @@ fn main() -> Result<(), Error> {
 
     // Testing
     let prog = llir::Program::from(tokens.clone());
-    println!("Program: {:?}\n", prog);
+    //println!("Program: {:?}\n", prog);
     let prog = opt::optimise(prog);
-    println!("Optimised program: {:?}", prog);
+    //println!("Optimised program: {:?}", prog);
     let out_txt = prog.generate_c()?;
 
     /*
