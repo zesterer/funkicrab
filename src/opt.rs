@@ -9,6 +9,7 @@ use crate::llir::{
     IoOp,
     IoSection,
     Section,
+    CellInfo,
     Program,
 };
 
@@ -98,11 +99,63 @@ pub fn optimise_sections(sections: &Vec<Section>) -> Vec<Section> {
         }
     }
 
-    optimise_sections_combine(new_sections)
+    let new_sections = optimise_sections_combine(new_sections);
+    new_sections
+}
+
+pub fn optimise_program_analysis(mut prog: Program) -> Program {
+    fn optimise_sections(sections: &mut Vec<Section>, cell_info: &mut CellInfo) {
+        for section in sections {
+            section.simplify_with(&cell_info);
+
+            match section {
+                Section::Basic(basic) => {
+                    for (idx, change) in &basic.changes {
+                        match change {
+                            Change::Set(expr) => cell_info.set_cell(
+                                *idx,
+                                expr.get_info(),
+                            ),
+                            Change::Incr(expr) => cell_info.incr_cell(
+                                *idx,
+                                expr.get_info(),
+                            ),
+                            _ => cell_info.set_cell(*idx, ValInfo::Unknown),
+                            // TODO: Add Change::Incr updating
+                        }
+                    }
+                },
+                Section::Loop(luup) => {
+                    if let ValInfo::Exactly(0) = luup.get_total_shift() {
+                        optimise_sections(&mut luup.sections, cell_info);
+                    } else {
+                        break;
+                    }
+                },
+                // TODO: Perform loop tail analysis to see whether we can turn them into ifs!
+                // TODO: Support other section types
+                _ => break,
+            }
+
+            if let ValInfo::Exactly(n) = section.get_total_shift() {
+                cell_info.incr_ptr(n);
+            } else {
+                break;
+            }
+        }
+    }
+
+    println!("Performing static analysis...");
+    let mut cell_info = CellInfo::root();
+
+    optimise_sections(&mut prog.sections, &mut cell_info);
+
+    prog
 }
 
 pub fn optimise_program(mut prog: Program) -> Program {
     prog.sections = optimise_sections(&prog.sections);
+    let prog = optimise_program_analysis(prog);
     prog
 }
 

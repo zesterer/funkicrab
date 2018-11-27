@@ -6,6 +6,15 @@ use std::{
 use super::Token;
 use crate::Error;
 
+#[derive(Clone, Debug)]
+pub enum LinearisationError {
+    ConstPredicate,
+    BadNetShift(ValInfo),
+    WrongSectionCount(usize),
+    WrongSectionType,
+    BadPredicateEffect(CellEffect),
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Idx(pub i32);
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -14,13 +23,23 @@ pub struct Diff(pub i32);
 // Represents compile-time knowledge of a particular value. This information is usually computed
 // through static analysis and is used to inform future optimisations.
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub enum ValInfo {
+pub enum ValInfo<T: Copy = i32> {
     // Value is (N)
-    Exactly(i32),
+    Exactly(T),
     // Value is (base + N * factor)
-    MultipleOf { base: i32, factor: i32 },
+    MultipleOf { base: T, factor: T },
     // No knowledge of value
     Unknown,
+}
+
+impl<T: Copy> ValInfo<T> {
+    pub fn try_eval(&self) -> Option<T> {
+        if let ValInfo::Exactly(val) = self {
+            Some(*val)
+        } else {
+            None
+        }
+    }
 }
 
 // Represents compile-time knowledge of the cells that a section might possibly access throughout
@@ -105,6 +124,7 @@ impl CellAccessInfo {
 
 // Describes the manner in which a cell may have its value altered over a particular execution
 // period. This is used in future passes to guide optimisations such as loop linearisation.
+#[derive(Clone, Debug)]
 pub enum CellEffect {
     // The cell's value is not affected throughout the execution period
     None,
@@ -219,6 +239,36 @@ impl Expr {
             _ => {},
         }
     }
+
+    // Attempt to infer information about this expression's value
+    pub fn get_info(&self) -> ValInfo {
+        // TODO: Provide richer information than this
+        self
+            .eval_local()
+            .map(|val| ValInfo::Exactly(val.0))
+            .unwrap_or(ValInfo::Unknown)
+    }
+
+    // Attempt to derive information from static cell analysis and incorporate it into the expression
+    pub fn simplify_with(&mut self, cell_info: &CellInfo) {
+        println!("Simplifying... {:?}", self);
+        match self {
+            Expr::CellVal(idx) => if let ValInfo::Exactly(n) = cell_info.get_cell(*idx) {
+                println!("Simplifying idx={:?}...", idx);
+                *self = Expr::Const(n);
+            },
+            Expr::Sum(expr0, expr1) => {
+                expr0.simplify_with(cell_info);
+                expr1.simplify_with(cell_info);
+            },
+            Expr::Product(expr0, expr1) => {
+                expr0.simplify_with(cell_info);
+                expr1.simplify_with(cell_info);
+            },
+            // Default to no simplification
+            _ => {},
+        }
+    }
 }
 
 // A change that occurs to a cell's value during the execution of a basic section. There are
@@ -228,6 +278,15 @@ impl Expr {
 pub enum Change {
     Set(Expr),
     Incr(Expr),
+}
+
+impl Change {
+    pub fn get_expr_cell_reads(&self) -> CellAccessInfo {
+        match self {
+            Change::Set(expr) => expr,
+            Change::Incr(expr) => expr,
+        }.get_cell_reads()
+    }
 }
 
 // A section that describes a so-called 'basic' section. These sections no looping code, only
@@ -247,20 +306,20 @@ impl BasicSection {
     }
 
     // Increment a cell relative to this section's pointer
-    fn add_cell_incr(&mut self, idx: Idx, diff: Diff) {
+    fn add_cell_incr(&mut self, idx: Idx, incr: Expr) {
         if let Some(change) = self.changes.get_mut(&idx) {
             match change {
                 Change::Set(expr) => *expr = Expr::Sum(
                     Box::new(expr.clone()),
-                    Box::new(Expr::Const(diff.0)),
+                    Box::new(incr),
                 ),
                 Change::Incr(expr) => *expr = Expr::Sum(
                     Box::new(expr.clone()),
-                    Box::new(Expr::Const(diff.0)),
+                    Box::new(incr),
                 ),
             }
         } else {
-            self.changes.insert(idx, Change::Incr(Expr::Const(diff.0)));
+            self.changes.insert(idx, Change::Incr(incr));
         }
     }
 
@@ -287,7 +346,7 @@ impl BasicSection {
     pub fn get_cell_reads(&self) -> CellAccessInfo {
         self.changes.iter().map(|(idx, change)| match change {
             Change::Set(expr) => expr.get_cell_reads(),
-            Change::Incr(expr) => expr.get_cell_reads(),
+            Change::Incr(expr) => expr.get_cell_reads().union(Idx(0), &CellAccessInfo::one(*idx)),
         }).fold(CellAccessInfo::empty(), |cai_sum, cai| cai_sum.union(Idx(0), &cai))
     }
 
@@ -320,19 +379,37 @@ impl BasicSection {
     pub fn apply(&self, other: &Self) -> Option<Self> {
         let mut basic = self.clone();
 
+        // TODO: Get this working by making sure that BasicSection doesn't have internal conflicts!
         return None;
-        if !other.get_cell_reads().union(Idx(0), &basic.get_cell_writes()).is_empty() {
+        if
+            !other.get_cell_writes()
+                .intersection(Idx(0), &basic.get_cell_reads())
+                .is_empty() ||
+            !other.get_cell_writes()
+                .intersection(Idx(0), &basic.get_cell_reads())
+                .is_empty()
+        {
             return None;
         }
 
         for (idx, change) in &other.changes {
             match change {
-                Change::Set(expr) => basic.add_cell_set(*idx, expr.clone()),
+                //Change::Set(expr) => basic.add_cell_set(*idx, expr.clone()),
+                Change::Incr(expr) => basic.add_cell_incr(*idx, expr.clone()),
                 _ => return None,
             }
         }
 
         Some(basic)
+    }
+
+    // Attempt to derive information from static cell analysis and incorporate it into the section
+    pub fn simplify_with(&mut self, cell_info: &CellInfo) {
+        // Try simplifying change expressions
+        self.changes.iter_mut().for_each(|(idx, change)| match change {
+            Change::Set(expr) => expr,
+            Change::Incr(expr) => expr,
+        }.simplify_with(cell_info));
     }
 }
 
@@ -374,6 +451,15 @@ impl IoSection {
             IoOp::InputCell(_) => None,
             IoOp::Output(expr) => Some(expr.get_cell_reads()),
         }).fold(CellAccessInfo::empty(), |total_cai, cai| total_cai.union(Idx(0), &cai))
+    }
+
+    // Attempt to derive information from static cell analysis and incorporate it into the section
+    pub fn simplify_with(&mut self, cell_info: &CellInfo) {
+        // Try simplifying I/O operations
+        self.ops.iter_mut().for_each(|op| match op {
+            IoOp::InputCell(_) => {},
+            IoOp::Output(expr) => expr.simplify_with(cell_info),
+        });
     }
 }
 
@@ -450,11 +536,9 @@ impl LoopSection {
     pub fn get_body_cell_reads(&self) -> CellAccessInfo {
         let mut cell_reads = CellAccessInfo::Exactly(HashSet::new());
 
-        let mut total_shift = Idx(0);
         for section in self.sections.iter() {
-            if let ValInfo::Exactly(shift) = section.get_total_shift() {
-                cell_reads = cell_reads.union(total_shift, &section.get_cell_reads());
-                total_shift.0 += shift;
+            if let ValInfo::Exactly(0) = section.get_total_shift() {
+                cell_reads = cell_reads.union(Idx(0), &section.get_cell_reads());
             } else {
                 cell_reads = CellAccessInfo::Unknown;
             }
@@ -480,65 +564,67 @@ impl LoopSection {
 
     // Determine the pointer-relative cells that are read by this LoopSection
     pub fn get_cell_reads(&self) -> CellAccessInfo {
-        let mut body_cell_reads = CellAccessInfo::Exactly(if let Predicate::Cell(idx) = self.predicate {
-            let mut h = HashSet::new();
-            h.insert(idx);
-            h
-        } else {
-            HashSet::new()
-        });
+        let mut body_cell_reads = self.get_body_cell_reads();
 
-        body_cell_reads.union(Idx(0), &CellAccessInfo::Exactly(if let Predicate::Cell(idx) = self.predicate {
-            let mut h = HashSet::new();
-            h.insert(idx);
-            h
-        } else {
-            HashSet::new()
-        }))
+        match self.predicate {
+            Predicate::Cell(idx) => if let ValInfo::Exactly(0) = self.get_total_shift() {
+                CellAccessInfo::one(idx).union(Idx(0), &body_cell_reads)
+            } else {
+                CellAccessInfo::Unknown
+            },
+            Predicate::Const(val) => if let ValInfo::Exactly(0) = self.get_total_shift() {
+                body_cell_reads
+            } else {
+                CellAccessInfo::Unknown
+            },
+        }
     }
 
     // Determine whether the loop can be linearised. If it can, determine the expression that acts
     // as a multiplier.
     // For example, [->++<] can be linearised to { ptr[1] += ptr[0] * 2; ptr[0] = 0; }.
-    pub fn can_linearise(&self) -> Option<Expr> {
+    pub fn can_linearise(&self) -> Result<Expr, LinearisationError> {
         match self.predicate {
             Predicate::Cell(idx) => {
                 // Only loops that have a total shift of zero can be statically linearised
-                if let ValInfo::Exactly(0) = self.get_total_shift() {
+                let total_shift = self.get_total_shift();
+                if let ValInfo::Exactly(0) = total_shift {
                     // Now, we ensure that no internal sections write to the predicate cell
                     // Reads are okay since we can be sure the value won't change over the course
                     // of the loop
                     if self.sections.len() != 1 {
                         // Only loops containing a single basic section may be linearised
-                        None
-                    } else if self.sections.iter().all(|section| match section {
-                        Section::Basic(basic) => {
-                            if let CellEffect::IncrByExactly(Diff(-1)) = basic.get_effect_for_cell(idx) {
-                                true
-                            } else {
-                                false
-                            }
-                        },
-                        // Only basic sections may be linearised!
-                        _ => false,
-                    }) {
-                        Some(Expr::CellVal(idx))
+                        Err(LinearisationError::WrongSectionCount(self.sections.len()))
                     } else {
-                        None
+                        match &self.sections[0] {
+                            Section::Basic(basic) => {
+                                let effect = basic.get_effect_for_cell(idx);
+                                if let CellEffect::IncrByExactly(Diff(-1)) = effect {
+                                    Ok(Expr::CellVal(idx))
+                                } else {
+                                    Err(LinearisationError::BadPredicateEffect(effect))
+                                }
+                            },
+                            // Only basic sections may be linearised!
+                            _ => Err(LinearisationError::WrongSectionType),
+                        }
                     }
                 } else {
-                    None
+                    Err(LinearisationError::BadNetShift(total_shift))
                 }
             },
-            Predicate::Const(_) => None,
+            Predicate::Const(_) => Err(LinearisationError::ConstPredicate),
         }
     }
 
+    // (Attempt to) linearise the LoopSection into a series of new sections
     pub fn linearise(&self) -> Option<Vec<Section>> {
         self.can_linearise().map(|factor_expr| {
             match &self.sections[0] {
                 Section::Basic(basic) => {
                     let mut loop_basic = basic.repeat(factor_expr);
+
+                    println!("Linearised: {:?}", self);
 
                     let mut setzero_basic = BasicSection::new();
                     if let Predicate::Cell(idx) = self.predicate {
@@ -546,15 +632,31 @@ impl LoopSection {
                         setzero_basic.add_cell_set(idx, Expr::Const(0));
                     }
 
-                    vec![
+                    let v = vec![
                         Section::Basic(loop_basic),
                         Section::Basic(setzero_basic),
-                    ]
+                    ];
+                    println!("Result: {:?}", v);
+                    v
                 },
                 // TODO: Remove this panic
                 _ => panic!("This shouldn't be possible"),
             }
-        })
+        }).ok()
+    }
+
+    // Attempt to derive information from static cell analysis and incorporate it into the section
+    pub fn simplify_with(&mut self, cell_info: &CellInfo) {
+        // If this loop is predicated by a cell...
+        if let Predicate::Cell(idx) = self.predicate {
+            // ...and that cell is determined to hold a value of 0 at compile-time...
+            if let ValInfo::Exactly(0) = cell_info.get_cell(idx) {
+                // ...convert the predicate to a constant
+                // (Note: this means the loop becomes dead)
+                // (That's a good thing for us)
+                self.predicate = Predicate::Const(0);
+            }
+        }
     }
 }
 
@@ -601,13 +703,6 @@ impl Section {
         }
     }
 
-    /*
-    // Determine the impact this section may have on a pointer-relative cell
-    pub fn effect_on(&self) -> CellEffect {
-
-    }
-    */
-
     // Determine the pointer-relative cells that are read by this section
     pub fn get_cell_reads(&self) -> CellAccessInfo {
         match self {
@@ -615,6 +710,78 @@ impl Section {
             Section::Io(io) => io.get_cell_reads(),
             Section::Loop(luup) => luup.get_cell_reads(),
         }
+    }
+
+    // Attempt to derive information from static cell analysis and incorporate it into the section
+    pub fn simplify_with(&mut self, cell_info: &CellInfo) {
+        match self {
+            Section::Basic(basic) => basic.simplify_with(cell_info),
+            Section::Io(io) => io.simplify_with(cell_info),
+            Section::Loop(luup) => luup.simplify_with(cell_info),
+            // TODO: Apply simplifications to other section types too!
+            _ => {},
+        }
+    }
+}
+
+// Used during compile-time static analysis of tape values
+pub struct CellInfo {
+    default: ValInfo,
+    cells: Vec<ValInfo>,
+    ptr: i32,
+}
+
+impl CellInfo {
+    pub fn root() -> Self {
+        Self {
+            default: ValInfo::Exactly(0),
+            cells: Vec::new(),
+            ptr: 0,
+        }
+    }
+
+    pub fn scoped() -> Self {
+        Self {
+            default: ValInfo::Unknown,
+            cells: Vec::new(),
+            ptr: 0,
+        }
+    }
+
+    // Increment the pointer
+    pub fn incr_ptr(&mut self, incr: i32) {
+        self.ptr += incr;
+    }
+
+    pub fn inform_cell(&mut self, idx: Idx, info: ValInfo) {
+        // TODO: Don't just reset the cell information
+        self.set_cell(idx, info);
+    }
+
+    pub fn incr_cell(&mut self, idx: Idx, incr: ValInfo) {
+        if let (
+                ValInfo::Exactly(incr),
+                ValInfo::Exactly(val),
+            ) = (incr, self.get_cell(idx)) {
+            self.set_cell(idx, ValInfo::Exactly(val + incr));
+        } else {
+            self.set_cell(idx, ValInfo::Unknown);
+        }
+    }
+
+    pub fn set_cell(&mut self, idx: Idx, info: ValInfo) {
+        let abs_idx = (self.ptr + idx.0) as usize;
+
+        if info != self.default {
+            while self.cells.len() <= abs_idx { self.cells.push(self.default); }
+        }
+        // TODO: Don't reset the cell information
+        self.cells.get_mut(abs_idx).map(|c| *c = info);
+    }
+
+    pub fn get_cell(&self, idx: Idx) -> ValInfo {
+        let abs_idx = (self.ptr + idx.0) as usize;
+        self.cells.get(abs_idx).cloned().unwrap_or(self.default)
     }
 }
 
@@ -636,8 +803,8 @@ impl From<Vec<Token>> for Program {
                 match tok {
                     Token::Right => current_shift += 1,
                     Token::Left => current_shift -= 1,
-                    Token::Inc => current_bs.add_cell_incr(Idx(current_shift), Diff(1)),
-                    Token::Dec => current_bs.add_cell_incr(Idx(current_shift), Diff(-1)),
+                    Token::Inc => current_bs.add_cell_incr(Idx(current_shift), Expr::Const(1)),
+                    Token::Dec => current_bs.add_cell_incr(Idx(current_shift), Expr::Const(-1)),
                     Token::Output => {
                         // Push the current basic section onto the section stack
                         let mut other_basic = BasicSection::new();
@@ -696,7 +863,7 @@ impl Program {
         fn stringify_expr(expr: &Expr) -> String {
             match expr {
                 Expr::Const(val) => format!("{}", val),
-                Expr::CellVal(idx) => format!("ptr[{}]", idx.0),
+                Expr::CellVal(idx) => format!("mem[ptr + ({})]", idx.0),
                 Expr::Sum(expr0, expr1) => format!("({} + {})", stringify_expr(expr0), stringify_expr(expr1)),
                 Expr::Product(expr0, expr1) => format!("({} * {})", stringify_expr(expr0), stringify_expr(expr1)),
             }
@@ -708,14 +875,16 @@ impl Program {
             if DEBUG {
                 for _ in 0..depth { code += "    "; }
                 code += "// --- BEGIN BASIC SECTION ---\n";
+                for _ in 0..depth { code += "    "; }
+                code += &format!("// NEXT SECTION CELL WRITES: {:?}\n", basic.get_cell_writes());
             }
 
             // Generate code for any cell changes made in this basic section
             for (idx, change) in &basic.changes {
                 for _ in 0..depth { code += "    "; }
                 code += &match change {
-                    Change::Set(expr) => format!("ptr[{}] = {};\n", idx.0, stringify_expr(expr)),
-                    Change::Incr(expr) => format!("ptr[{}] += {};\n", idx.0, stringify_expr(expr)),
+                    Change::Set(expr) => format!("mem[ptr + ({})] = {};\n", idx.0, stringify_expr(expr)),
+                    Change::Incr(expr) => format!("mem[ptr + ({})] += {};\n", idx.0, stringify_expr(expr)),
                 }
             }
 
@@ -740,7 +909,7 @@ impl Program {
                 for _ in 0..depth { code += "    "; }
                 code += &match op {
                     IoOp::Output(expr) => format!("putchar({});\n", stringify_expr(expr)),
-                    IoOp::InputCell(idx) => format!("ptr[{}] = getchar();\n", idx.0),
+                    IoOp::InputCell(idx) => format!("mem[ptr + ({})] = getchar();\n", idx.0),
                 }
             }
 
@@ -759,19 +928,23 @@ impl Program {
                 for _ in 0..depth { code += "    "; }
                 code += "// --- BEGIN LOOP SECTION ---\n";
                 for _ in 0..depth { code += "    "; }
-                code += &format!("// CAN_LINEARISE = {} \n", luup.can_linearise().is_some());
+                code += &format!(
+                    "// LINEARISATION = {:?} \n",
+                    luup.can_linearise().map(|_| true)
+                );
             }
 
             // Generate code for loop body and contained sections
             for _ in 0..depth { code += "    "; }
             code += &match luup.predicate {
-                Predicate::Cell(idx) => format!("while (ptr[{}]) {{\n", idx.0),
+                Predicate::Cell(idx) => format!("while (mem[ptr + ({})]) {{\n", idx.0),
                 Predicate::Const(val) => format!("while ({}) {{\n", val),
             };
             code += &stringify_sections(&luup.sections, depth + 1);
             if luup.postshift.0 != 0 {
                 for _ in 0..depth + 1 { code += "    "; }
-                code += &format!("ptr += {};\n", luup.postshift.0);
+                //code += &format!("ptr = (size_t)((long)ptr + ({})) % 65336;\n", luup.postshift.0);
+                code += &format!("ptr = ptr + ({});\n", luup.postshift.0);
             }
             for _ in 0..depth { code += "    "; }
             code += "}\n";
@@ -811,9 +984,10 @@ impl Program {
 
         Ok(format!(
             "#include <stdio.h>\
-            \n\nchar mem[30000];\
+            \n#include <stdint.h>\
+            \n\nuint8_t mem[65536];\
             \n\nint main() {{\
-            \n    char* ptr = mem;\
+            \n    size_t ptr = 0;\
             \n\n{}\
             \n    return 0;\
             \n}}\
