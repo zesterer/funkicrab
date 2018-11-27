@@ -380,13 +380,12 @@ impl BasicSection {
         let mut basic = self.clone();
 
         // TODO: Get this working by making sure that BasicSection doesn't have internal conflicts!
-        return None;
         if
             !other.get_cell_writes()
                 .intersection(Idx(0), &basic.get_cell_reads())
                 .is_empty() ||
-            !other.get_cell_writes()
-                .intersection(Idx(0), &basic.get_cell_reads())
+            !basic.get_cell_writes()
+                .intersection(Idx(0), &other.get_cell_reads().union(Idx(0), &other.get_cell_writes()))
                 .is_empty()
         {
             return None;
@@ -394,6 +393,7 @@ impl BasicSection {
 
         for (idx, change) in &other.changes {
             match change {
+                // TODO: Fix this
                 //Change::Set(expr) => basic.add_cell_set(*idx, expr.clone()),
                 Change::Incr(expr) => basic.add_cell_incr(*idx, expr.clone()),
                 _ => return None,
@@ -407,9 +407,18 @@ impl BasicSection {
     pub fn simplify_with(&mut self, cell_info: &CellInfo) {
         // Try simplifying change expressions
         self.changes.iter_mut().for_each(|(idx, change)| match change {
-            Change::Set(expr) => expr,
-            Change::Incr(expr) => expr,
-        }.simplify_with(cell_info));
+            Change::Set(expr) => expr.simplify_with(cell_info),
+            Change::Incr(expr) => {
+                if let ValInfo::Exactly(n) = cell_info.get_cell(*idx) {
+                    *change = Change::Set(Expr::Sum(
+                        Box::new(Expr::Const(n)),
+                        Box::new(expr.clone()),
+                    ));
+                } else {
+                    expr.simplify_with(cell_info);
+                }
+            },
+        });
     }
 }
 
@@ -451,6 +460,14 @@ impl IoSection {
             IoOp::InputCell(_) => None,
             IoOp::Output(expr) => Some(expr.get_cell_reads()),
         }).fold(CellAccessInfo::empty(), |total_cai, cai| total_cai.union(Idx(0), &cai))
+    }
+
+    // Determine the pointer-relative cells that are written to by this IoSection
+    pub fn get_cell_writes(&self) -> CellAccessInfo {
+        self.ops.iter().filter_map(|op| match op {
+            IoOp::InputCell(idx) => Some(CellAccessInfo::one(*idx)),
+            _ => None,
+        }).fold(CellAccessInfo::empty(), |cai_sum, cai| cai_sum.union(Idx(0), &cai))
     }
 
     // Attempt to derive information from static cell analysis and incorporate it into the section
@@ -740,7 +757,7 @@ impl CellInfo {
         }
     }
 
-    pub fn scoped() -> Self {
+    pub fn luup() -> Self {
         Self {
             default: ValInfo::Unknown,
             cells: Vec::new(),
@@ -764,6 +781,7 @@ impl CellInfo {
                 ValInfo::Exactly(val),
             ) = (incr, self.get_cell(idx)) {
             self.set_cell(idx, ValInfo::Exactly(val + incr));
+            println!("Incrementing...");
         } else {
             self.set_cell(idx, ValInfo::Unknown);
         }
@@ -858,7 +876,7 @@ impl From<Vec<Token>> for Program {
 
 impl Program {
     pub fn generate_c(&self) -> Result<String, Error> {
-        const DEBUG: bool = true;
+        const DEBUG: bool = false;
 
         fn stringify_expr(expr: &Expr) -> String {
             match expr {

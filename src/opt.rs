@@ -62,6 +62,22 @@ pub fn optimise_sections_combine(sections: Vec<Section>) -> Vec<Section> {
                         current = Some(Section::Basic(next));
                     }
                 },
+                (Section::Basic(prev), Section::Io(next)) => {
+                    if
+                        next.get_cell_writes().intersection(Idx(0), &prev.get_cell_reads().union(Idx(0), &prev.get_cell_writes())).is_empty() &&
+                        next.get_cell_reads().intersection(Idx(0), &prev.get_cell_writes()).is_empty()
+                    {
+                        // Swap!
+                        new_sections.push(Section::Io(next));
+                        current = Some(Section::Basic(prev));
+                        //new_sections.push(Section::Basic(prev));
+                        //current = Some(Section::Io(next));
+                    } else {
+                        new_sections.push(Section::Basic(prev));
+                        current = Some(Section::Io(next));
+                    }
+                },
+                // TODO: Add swapping to move inputs to start if possible
                 // Default
                 (prev, next) => { new_sections.push(prev); current = Some(next); },
             }
@@ -125,10 +141,20 @@ pub fn optimise_program_analysis(mut prog: Program) -> Program {
                         }
                     }
                 },
+                Section::Io(io) => {
+                    for op in &io.ops {
+                        match op {
+                            IoOp::InputCell(idx) => cell_info.set_cell(*idx, ValInfo::Unknown),
+                            IoOp::Output(_) => {},
+                        }
+                    }
+                },
                 Section::Loop(luup) => {
                     if let ValInfo::Exactly(0) = luup.get_total_shift() {
                         optimise_sections(&mut luup.sections, cell_info);
                     } else {
+                        // TODO: Make this faster
+                        //optimise_sections(&mut luup.sections, &mut CellInfo::luup());
                         break;
                     }
                 },
@@ -160,7 +186,8 @@ pub fn optimise_program(mut prog: Program) -> Program {
 }
 
 pub fn optimise(mut prog: Program) -> Program {
-    loop {
+    const MAX_TRIES: usize = 5;
+    for _ in 0..MAX_TRIES {
         let new_prog = optimise_program(prog.clone());
         if prog == new_prog {
             return prog;
