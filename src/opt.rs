@@ -8,6 +8,8 @@ use crate::llir::{
     BasicSection,
     IoOp,
     IoSection,
+    Predicate,
+    LoopSection,
     Section,
     CellInfo,
     Program,
@@ -62,6 +64,17 @@ pub fn optimise_sections_combine(sections: Vec<Section>) -> Vec<Section> {
                         current = Some(Section::Basic(next));
                     }
                 },
+                // Combine consecutive I/O sections by applying the latter to the former
+                (Section::Io(prev), Section::Io(next)) => {
+                    // Basic sections can only be combined if they have non-conflicting cell writes
+                    if let Some(new) = prev.apply(&next) {
+                        current = Some(Section::Io(new));
+                    } else {
+                        new_sections.push(Section::Io(prev));
+                        current = Some(Section::Io(next));
+                    }
+                },
+                // TODO: Find a more efficient way of swapping than *bubble sort*
                 (Section::Basic(prev), Section::Io(next)) => {
                     if
                         next.get_cell_writes().intersection(Idx(0), &prev.get_cell_reads().union(Idx(0), &prev.get_cell_writes())).is_empty() &&
@@ -70,8 +83,6 @@ pub fn optimise_sections_combine(sections: Vec<Section>) -> Vec<Section> {
                         // Swap!
                         new_sections.push(Section::Io(next));
                         current = Some(Section::Basic(prev));
-                        //new_sections.push(Section::Basic(prev));
-                        //current = Some(Section::Io(next));
                     } else {
                         new_sections.push(Section::Basic(prev));
                         current = Some(Section::Io(next));
@@ -115,12 +126,15 @@ pub fn optimise_sections(sections: &Vec<Section>) -> Vec<Section> {
         }
     }
 
-    let new_sections = optimise_sections_combine(new_sections);
+    const COMBINE_REPEATS: usize = 5;
+    for _ in 0..COMBINE_REPEATS {
+        new_sections = optimise_sections_combine(new_sections);
+    }
     new_sections
 }
 
 pub fn optimise_program_analysis(mut prog: Program) -> Program {
-    fn optimise_sections(sections: &mut Vec<Section>, cell_info: &mut CellInfo) {
+    fn optimise_sections(sections: &mut Vec<Section>, cell_info: &mut CellInfo, depth: usize) {
         for section in sections {
             section.simplify_with(&cell_info);
 
@@ -129,14 +143,20 @@ pub fn optimise_program_analysis(mut prog: Program) -> Program {
                     for (idx, change) in &basic.changes {
                         match change {
                             Change::Set(expr) => cell_info.set_cell(
+                                depth,
                                 *idx,
                                 expr.get_info(),
                             ),
                             Change::Incr(expr) => cell_info.incr_cell(
+                                depth,
                                 *idx,
                                 expr.get_info(),
                             ),
-                            _ => cell_info.set_cell(*idx, ValInfo::Unknown),
+                            _ => cell_info.set_cell(
+                                depth,
+                                *idx,
+                                ValInfo::Unknown
+                            ),
                             // TODO: Add Change::Incr updating
                         }
                     }
@@ -144,23 +164,33 @@ pub fn optimise_program_analysis(mut prog: Program) -> Program {
                 Section::Io(io) => {
                     for op in &io.ops {
                         match op {
-                            IoOp::InputCell(idx) => cell_info.set_cell(*idx, ValInfo::Unknown),
+                            IoOp::InputCell(idx) => cell_info.set_cell(depth, *idx, ValInfo::Unknown),
                             IoOp::Output(_) => {},
                         }
                     }
                 },
                 Section::Loop(luup) => {
                     if let ValInfo::Exactly(0) = luup.get_total_shift() {
-                        optimise_sections(&mut luup.sections, cell_info);
+                        optimise_sections(&mut luup.sections, cell_info, depth + 1);
+
+                        // Attempt to substitute a while loop with an if statement
+                        match luup.predicate {
+                            Predicate::Cell(idx) => match cell_info.get_cell(idx) {
+                                ValInfo::Exactly(0) => luup.iters = ValInfo::Exactly(1),
+                                _ => cell_info.invalidate_depth(depth + 1),
+                            },
+                            _ => cell_info.invalidate_depth(depth + 1),
+                        }
+                        // TODO: This line shouldn't be needed
+                        cell_info.invalidate_depth(depth + 1);
                     } else {
                         // TODO: Make this faster
-                        //optimise_sections(&mut luup.sections, &mut CellInfo::luup());
-                        break;
+                        optimise_sections(&mut luup.sections, &mut CellInfo::luup(), depth + 1);
+                        cell_info.invalidate_all();
+                        break; // TODO: this shouldn't be needed
                     }
                 },
-                // TODO: Perform loop tail analysis to see whether we can turn them into ifs!
-                // TODO: Support other section types
-                _ => break,
+                // TODO: Perform
             }
 
             if let ValInfo::Exactly(n) = section.get_total_shift() {
@@ -174,7 +204,7 @@ pub fn optimise_program_analysis(mut prog: Program) -> Program {
     println!("Performing static analysis...");
     let mut cell_info = CellInfo::root();
 
-    optimise_sections(&mut prog.sections, &mut cell_info);
+    optimise_sections(&mut prog.sections, &mut cell_info, 0);
 
     prog
 }
